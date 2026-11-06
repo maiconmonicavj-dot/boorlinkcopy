@@ -69,6 +69,24 @@ curl -X POST localhost:8077/api/convert -b cookies.txt \
 curl -X POST "localhost:8077/api/robot/run?store=amazon" -b cookies.txt
 ```
 
+## Vercel (link público)
+
+O projeto já está no GitHub: **https://github.com/maiconmonicavj-dot/boorlinkcopy**
+
+1. Importar o repositório na Vercel (Framework: *Other*, sem build command).
+2. Criar o banco na nuvem (Turso/libSQL tem plano gratuito) e definir:
+   `BOOR_DB_URL=libsql://...` e `BOOR_DB_TOKEN=...` — o sistema usa esse banco
+   automaticamente (adaptador libSQL em `app/db.py`); sem isso a Vercel usa `/tmp` e perde dados.
+3. Definir também `BOOR_SECRET_KEY`, `BOOR_OFFLINE_PASSWORD`, `BOOR_UNLOCK_TOKEN`,
+   `BOOR_COOKIE_SECURE=1`.
+4. Copiar os dados que já existem aqui para a nuvem:
+   `python scripts/migrate_to_turso.py` (com as duas variáveis do Turso no ambiente).
+5. Robô: criar um Cron Job na Vercel chamando `POST /api/robot/run` a cada 20–30 min.
+6. Fotos: com `VERCEL=1` o sistema guarda as URLs originais das lojas (não expiram);
+   para guardar os arquivos, use Vercel Blob/S3 e defina `BOOR_IMG_DIR`.
+
+Detalhes em `app/vercel_notes.md`.
+
 ## Subir na nuvem
 
 1. Crie um servidor (Railway, Render, Fly.io, VPS com Docker) com Python 3.11.
