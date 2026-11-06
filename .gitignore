@@ -1,0 +1,8 @@
+# Dados locais (nao versionar)
+data/
+app/data/
+*.pyc
+__pycache__/
+.venv/
+.env
+.vercel/
