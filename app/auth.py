@@ -247,7 +247,7 @@ def change_password(user_id: int, current: str, new: str) -> None:
         raise AuthError("Senha atual incorreta.")
     if len(new or "") < 10:
         raise AuthError("A nova senha precisa ter no mínimo 10 caracteres.")
-    db.execute("UPDATE users SET password_hash = ? WHERE id = ?",
-               (security.hash_password(new), user_id))
+    new_hash = security.hash_password(new)
+    db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
     db.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
     log_event("password_changed", f"user {user_id}", "warning")
