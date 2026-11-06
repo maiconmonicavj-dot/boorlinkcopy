@@ -11,6 +11,10 @@ DATA_DIR = Path(os.getenv("BOOR_DATA_DIR", _default_data))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = Path(os.getenv("BOOR_DB", DATA_DIR / "boorlinkcopy.db"))
+# Banco externo (a Vercel não mantém o SQLite): Turso/libSQL ou Postgres
+DB_URL = os.getenv("BOOR_DB_URL") or os.getenv("TURSO_DATABASE_URL") or ""
+DB_TOKEN = os.getenv("BOOR_DB_TOKEN") or os.getenv("TURSO_AUTH_TOKEN") or ""
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # --- Segurança ---------------------------------------------------------------
 # Chave usada para criptografar segredos (refresh tokens, TOTP seeds) no banco.
