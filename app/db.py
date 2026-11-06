@@ -5,7 +5,7 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Any, Iterable
 
-from .config import DB_PATH
+from .config import DATABASE_URL, DB_PATH, DB_TOKEN, DB_URL
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -134,7 +134,145 @@ CREATE INDEX IF NOT EXISTS idx_events_created ON security_events(created_at DESC
 """
 
 
-def connect() -> sqlite3.Connection:
+def _turso_enabled() -> bool:
+    return bool(DB_URL and DB_TOKEN and DB_URL.startswith("libsql://"))
+
+
+def _turso_http(url: str) -> str:
+    host = url.replace("libsql://", "").replace("https://", "").strip("/")
+    return f"https://{host}/v2/pipeline"
+
+
+class LibSQLConn:
+    """Adaptador mínimo que fala o protocolo HTTP do Turso/libSQL.
+
+    Usa a mesma interface do sqlite3 usada neste projeto (execute, executemany,
+    executescript, commit, rollback, close).
+    """
+
+    def __init__(self, url: str, token: str):
+        self.url = url
+        self.token = token
+        self._last_id = 0
+
+    def _value(self, v: Any) -> dict:
+        if v is None:
+            return {"type": "null"}
+        if isinstance(v, bool):
+            return {"type": "integer", "value": str(int(v))}
+        if isinstance(v, int):
+            return {"type": "integer", "value": str(v)}
+        if isinstance(v, float):
+            return {"type": "float", "value": v}
+        if isinstance(v, bytes):
+            import base64
+
+            return {"type": "blob", "base64": base64.b64encode(v).decode()}
+        return {"type": "text", "value": str(v)}
+
+    def _rows(self, result: dict) -> list[dict]:
+        cols = [c["name"] for c in result.get("cols", [])]
+        out = []
+        for row in result.get("rows", []):
+            out.append({cols[i]: self._py(cell) for i, cell in enumerate(row)})
+        return out
+
+    @staticmethod
+    def _py(cell: dict):
+        t = cell.get("type")
+        if t == "null":
+            return None
+        if t == "integer":
+            return int(cell["value"])
+        if t == "float":
+            return float(cell["value"])
+        return cell.get("value")
+
+    def _call(self, stmts: list[dict]) -> list[dict]:
+        import requests
+
+        payload = {"requests": stmts + [{"type": "close"}]}
+        r = requests.post(self.url, json=payload, timeout=45, headers={
+            "Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
+        r.raise_for_status()
+        data = r.json()
+        results = []
+        for res in data.get("results", []):
+            if res.get("type") == "error":
+                raise RuntimeError(res.get("error", {}).get("message", "erro libSQL"))
+            results.append(res.get("response", {}).get("result", {}))
+        return results
+
+    # interface sqlite3 -----------------------------------------------------
+    def execute(self, sql: str, params: Iterable[Any] = ()):
+        stmt = {"type": "execute", "stmt": {"sql": sql,
+                "args": [self._value(p) for p in params]}}
+        if sql.strip().lower().startswith("insert"):
+            stmt["stmt"]["want_last_insert_rowid"] = True
+        res = self._call([stmt])[0]
+        rows = self._rows(res)
+        if "last_insert_rowid" in res:
+            self._last_id = int(res["last_insert_rowid"] or 0)
+        return _Result(rows, getattr(self, "_last_id", 0))
+
+    def executescript(self, script: str):
+        stmts = [s.strip() for s in script.split(";") if s.strip()]
+        for chunk in stmts:
+            self.execute(chunk)
+        self.commit()
+
+    def executemany(self, sql: str, seq):
+        for params in seq:
+            self.execute(sql, params)
+        self.commit()
+
+    def begin(self):
+        self.execute("BEGIN")
+
+    def commit(self):
+        try:
+            self.execute("COMMIT")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def rollback(self):
+        try:
+            self.execute("ROLLBACK")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def close(self):
+        pass
+
+
+class _Result:
+    def __init__(self, rows: list[dict], last_id: int = 0):
+        self._rows = rows
+        self.rowcount = len(rows)
+        self.lastrowid = last_id
+
+    def fetchall(self):
+        return [_Rec(r) for r in self._rows]
+
+    def fetchone(self):
+        return _Rec(self._rows[0]) if self._rows else None
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class _Rec(dict):
+    """Registro com acesso por índice e por nome (como sqlite3.Row)."""
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return dict.__getitem__(self, key)
+
+
+def connect():
+    if _turso_enabled():
+        return LibSQLConn(_turso_http(DB_URL), DB_TOKEN)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -146,6 +284,8 @@ def connect() -> sqlite3.Connection:
 def db():
     conn = connect()
     try:
+        if hasattr(conn, "begin"):
+            conn.begin()
         yield conn
         conn.commit()
     except Exception:
@@ -174,20 +314,22 @@ def init_db() -> None:
         _migrate(conn)
 
 
-def query(sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
+def query(sql: str, params: Iterable[Any] = ()) -> list:
     with db() as conn:
-        return conn.execute(sql, tuple(params)).fetchall()
+        cur = conn.execute(sql, tuple(params))
+        return list(cur.fetchall())
 
 
-def query_one(sql: str, params: Iterable[Any] = ()) -> sqlite3.Row | None:
+def query_one(sql: str, params: Iterable[Any] = ()):
     with db() as conn:
-        return conn.execute(sql, tuple(params)).fetchone()
+        cur = conn.execute(sql, tuple(params))
+        return cur.fetchone()
 
 
 def execute(sql: str, params: Iterable[Any] = ()) -> int:
     with db() as conn:
         cur = conn.execute(sql, tuple(params))
-        return cur.lastrowid or 0
+        return getattr(cur, "lastrowid", 0) or 0
 
 
 # --- settings (chave/valor) ---------------------------------------------------
