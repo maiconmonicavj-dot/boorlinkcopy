@@ -1,0 +1,6 @@
+fastapi
+requests
+cryptography
+pyotp
+qrcode
+python-multipart
