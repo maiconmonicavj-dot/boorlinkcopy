@@ -375,13 +375,15 @@ def upsert_store(body: StoreIn, user: dict = Depends(current_user)):
                api_kind=?, api_base=?, collector_url=?, min_rating=?, min_sales=?,
                api_key_enc=COALESCE(?, api_key_enc),
                api_secret_enc=COALESCE(?, api_secret_enc),
-               refresh_token_enc=COALESCE(?, refresh_token_enc),
-               token_expires_at=CASE WHEN ? IS NULL THEN token_expires_at ELSE NULL END
+               refresh_token_enc=COALESCE(?, refresh_token_enc)
                WHERE id=?""",
             (data["name"], data["domain"], data["affiliate_param"], data["affiliate_value"],
              data["api_kind"], data["api_base"], data["collector_url"], data["min_rating"],
              data["min_sales"], enc(data["api_key"]), enc(data["api_secret"]),
-             enc(data["refresh_token"]), data["refresh_token"], existing["id"]))
+             enc(data["refresh_token"]), existing["id"]))
+        if data["refresh_token"]:
+            db.execute("UPDATE stores SET token_expires_at = NULL WHERE id = ?",
+                       (existing["id"],))
         return {"ok": True, "id": existing["id"], "updated": True}
 
     sid = db.execute(
