@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>boorlinkcopy — copiador e conversor de links de afiliado</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<div id="toast" class="toast hidden"></div>
+
+<!-- ================= LOGIN ================= -->
+<section id="auth" class="auth-wrap">
+  <div class="auth-card">
+    <div class="brand">
+      <span class="logo">🔗</span>
+      <div>
+        <h1>boorlinkcopy</h1>
+        <p class="muted">copiador de links · conversor de afiliado · ofertas e cupons</p>
+      </div>
+    </div>
+
+    <div id="lockBanner" class="banner danger hidden">
+      <strong>Sistema desligado por segurança.</strong>
+      <span id="lockReason"></span>
+      <button class="btn danger sm" onclick="showRecover()">Reativar com senha offline</button>
+    </div>
+
+    <!-- etapa 1: email + senha -->
+    <form id="formLogin" class="stack">
+      <label>E-mail <input type="email" id="email" autocomplete="username" required /></label>
+      <label>Senha <input type="password" id="password" autocomplete="current-password" required /></label>
+      <button class="btn primary" type="submit">Entrar</button>
+      <p class="muted small">Primeiro acesso? <a href="#" onclick="showRegister();return false">criar conta</a></p>
+    </form>
+
+    <!-- cadastro -->
+    <form id="formRegister" class="stack hidden">
+      <label>E-mail <input type="email" id="regEmail" required /></label>
+      <label>Senha (mín. 10 caracteres) <input type="password" id="regPass" minlength="10" required /></label>
+      <button class="btn primary" type="submit">Criar conta e configurar 2FA</button>
+      <p class="muted small"><a href="#" onclick="showLogin();return false">já tenho conta</a></p>
+    </form>
+
+    <!-- 2FA setup -->
+    <div id="setup2fa" class="stack hidden">
+      <h3>1. Escaneie o QR code no autenticador</h3>
+      <img id="qrImg" class="qr" alt="QR code do autenticador" />
+      <p class="muted small">Ou digite a chave: <code id="totpSecret"></code></p>
+      <h3>2. Digite o código de 6 dígitos</h3>
+      <input id="setupCode" inputmode="numeric" maxlength="6" placeholder="000000" />
+      <button class="btn primary" onclick="confirm2fa()">Ativar 2FA e entrar</button>
+    </div>
+
+    <!-- 2FA verify -->
+    <div id="verify2fa" class="stack hidden">
+      <h3>Código do autenticador</h3>
+      <p class="muted small">Um código novo é exigido a cada entrada.</p>
+      <input id="verifyCode" inputmode="numeric" maxlength="6" placeholder="000000" />
+      <button class="btn primary" onclick="verify2fa()">Confirmar</button>
+      <p class="muted small"><a href="#" onclick="showLogin();return false">voltar</a></p>
+    </div>
+
+    <!-- recuperação offline -->
+    <form id="formRecover" class="stack hidden">
+      <h3>Reativação com senha offline</h3>
+      <p class="muted small">Senha gerada na instalação e guardada fora do servidor.</p>
+      <input type="password" id="recoverPass" placeholder="senha offline" required />
+      <button class="btn danger" type="submit">Reativar sistema</button>
+    </form>
+  </div>
+</section>
+
+<!-- ================= APP ================= -->
+<section id="app" class="hidden">
+  <header class="topbar">
+    <div class="brand small">
+      <span class="logo">🔗</span><h1>boorlinkcopy</h1>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="ofertas">Ofertas</button>
+      <button class="tab" data-tab="converter">Converter links</button>
+      <button class="tab" data-tab="cupons">Cupons</button>
+      <button class="tab" data-tab="lojas">Lojas & APIs</button>
+      <button class="tab" data-tab="robo">Robô</button>
+      <button class="tab" data-tab="telegram">Telegram</button>
+      <button class="tab" data-tab="seguranca">Segurança</button>
+    </nav>
+    <div class="top-actions">
+      <span id="whoami" class="muted small"></span>
+      <button class="btn ghost sm" onclick="logout()">Sair</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- OFERTAS -->
+    <section id="tab-ofertas" class="tabpane">
+      <div class="cards" id="dashCards"></div>
+      <div class="dealmenu" id="dealMenu"></div>
+      <div class="catmenu" id="catMenu"></div>
+      <div class="toolbar">
+        <input id="offerSearch" placeholder="buscar oferta ou cupom..." />
+        <select id="offerCategory"><option value="">todas as categorias</option></select>
+        <select id="offerStatus">
+          <option value="approved">Aprovadas</option>
+          <option value="blocked">Bloqueadas pelo antifraude</option>
+        </select>
+        <button class="btn" onclick="loadOffers()">Atualizar</button>
+        <button class="btn primary" onclick="backfillImages()">Buscar fotos reais</button>
+      </div>
+      <div id="offersList" class="offers"></div>
+    </section>
+
+    <!-- CONVERTER -->
+    <section id="tab-converter" class="tabpane hidden">
+      <h2>Conversor de links em links de afiliado</h2>
+      <p class="muted">Cole um ou vários links (um por linha). A tag da loja é aplicada automaticamente.</p>
+      <textarea id="linksInput" rows="7" placeholder="https://www.amazon.com.br/dp/...&#10;https://produto.mercadolivre.com.br/..."></textarea>
+      <div class="row">
+        <input id="tagOverride" placeholder="tag de afiliado (opcional, sobrepõe a da loja)" />
+        <button class="btn primary" onclick="convertLinks()">Converter</button>
+      </div>
+      <div id="convertResults" class="results"></div>
+    </section>
+
+    <!-- CUPONS -->
+    <section id="tab-cupons" class="tabpane hidden">
+      <h2>Cupons ativos</h2>
+      <div id="couponsList" class="offers"></div>
+      <h3>Adicionar cupom manualmente</h3>
+      <div class="row wrap">
+        <select id="couponStore"></select>
+        <input id="couponCode" placeholder="CÓDIGO" />
+        <input id="couponTitle" placeholder="descrição do cupom" />
+        <input id="couponUrl" placeholder="link da oferta (opcional)" />
+        <button class="btn primary" onclick="addCoupon()">Salvar cupom</button>
+      </div>
+    </section>
+
+    <!-- LOJAS -->
+    <section id="tab-lojas" class="tabpane hidden">
+      <h2>Lojas, tags e APIs</h2>
+      <p class="muted">Cadastre a tag de afiliado e, se tiver, as credenciais da API (com refresh token para renovação automática).</p>
+      <div id="storesList" class="stores"></div>
+    </section>
+
+    <!-- ROBÔ -->
+    <section id="tab-robo" class="tabpane hidden">
+      <h2>Robô coletor</h2>
+      <p class="muted">Comportamento humano: pausas aleatórias, rotação de user-agent e renovação de token antes de cada ciclo.</p>
+      <div class="row">
+        <select id="robotStore"><option value="">todas as lojas</option></select>
+        <button class="btn primary" onclick="runRobot()">Executar ciclo agora</button>
+      </div>
+      <div id="robotRuns" class="results"></div>
+
+      <h2 style="margin-top:2rem">Critérios de postagem</h2>
+      <p class="muted">O robô só posta o que passa destes números. O preview mostra quantas
+        ofertas passariam antes de você salvar.</p>
+      <div class="crit-grid">
+        <label>Desconto mínimo (%)
+          <input id="critDiscount" type="number" step="1" min="0" max="95" /></label>
+        <label>Nota de curadoria mínima (0-100)
+          <input id="critScore" type="number" step="1" min="0" max="100" /></label>
+        <label>Reputação mínima do vendedor
+          <input id="critRating" type="number" step="0.1" min="0" max="5" /></label>
+        <label>Vendas mínimas
+          <input id="critSales" type="number" step="10" min="0" /></label>
+        <label>Postagens por ciclo
+          <input id="critMaxPosts" type="number" step="1" min="1" max="30" /></label>
+        <label>Intervalo do robô (min)
+          <input id="critInterval" type="number" step="5" min="5" max="720" /></label>
+      </div>
+      <label class="crit-wide">Palavras-chave que valem mais (separe por vírgula)
+        <input id="critHot" placeholder="ex: fone, airfryer, smart tv" /></label>
+      <label class="crit-wide">Palavras que você NÃO quer postar
+        <input id="critBlocked" placeholder="ex: usado, recondicionado" /></label>
+      <label class="crit-wide">Palavras de cautela (perdem pontos)
+        <input id="critCaution" placeholder="ex: importado, kit 1 unidade" /></label>
+      <label class="crit-wide">Palavras de fraude (antifraude bloqueia a oferta)
+        <input id="critRisk" placeholder="ex: golpe, nao entregou, falsificado" /></label>
+      <div class="row">
+        <button class="btn" onclick="previewCriteria()">Testar critérios</button>
+        <button class="btn primary" onclick="saveCriteria()">Salvar critérios</button>
+      </div>
+      <div id="critPreview" class="results"></div>
+      <p class="muted small" id="critDefaults"></p>
+    </section>
+
+    <!-- TELEGRAM -->
+    <section id="tab-telegram" class="tabpane hidden">
+      <h2>Postar ofertas no grupo do Telegram</h2>
+      <p class="muted">O robô escolhe as ofertas que compensam (desconto, reputação, cupom e
+        procura do produto), monta a mensagem e publica no seu grupo com o link já afiliado.</p>
+      <div class="cards" id="tgCards"></div>
+      <div class="row wrap">
+        <input id="tgToken" type="password" placeholder="token do bot (BotFather)" />
+        <input id="tgChat" placeholder="ID do grupo, ex: -1001234567890" />
+        <button class="btn primary" onclick="saveTelegram()">Salvar</button>
+        <button class="btn" onclick="testTelegram()">Testar envio</button>
+        <button class="btn ok" onclick="publishTelegram()">Publicar pendentes agora</button>
+      </div>
+      <p class="muted small">Como pegar: crie um bot no @BotFather, adicione o bot ao grupo como
+        administrador, e o ID do grupo começa com -100. Para descobrir o ID, mande uma mensagem
+        no grupo e abra <code>api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>.</p>
+      <h3>Prévia da próxima postagem</h3>
+      <div id="tgPreview" class="results"></div>
+    </section>
+
+    <!-- SEGURANÇA -->
+    <section id="tab-seguranca" class="tabpane hidden">
+      <h2>Segurança</h2>
+      <div class="cards" id="secCards"></div>
+      <h3>Eventos recentes</h3>
+      <div id="eventsList" class="events"></div>
+    </section>
+  </main>
+</section>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
