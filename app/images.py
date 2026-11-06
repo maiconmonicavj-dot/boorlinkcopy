@@ -218,12 +218,21 @@ def _esc(text: str) -> str:
 
 
 # --- resolução completa -------------------------------------------------------
-def resolve(offer: dict, store_name: str = "", save_locally: bool = True) -> str:
+def _external_storage() -> bool:
+    """Na Vercel (disco efêmero) guardamos só a URL original, que não expira."""
+    import os
+
+    return bool(os.getenv("BOOR_IMAGES_REMOTE") or os.getenv("VERCEL"))
+
+
+def resolve(offer: dict, store_name: str = "", save_locally: bool | None = None) -> str:
     """Devolve a melhor imagem disponível para a oferta.
 
     save_locally=True baixa a imagem para /media (evita hotlink bloqueado e
     garante que ela apareça mesmo quando a loja exige referer).
     """
+    if save_locally is None:
+        save_locally = not _external_storage()
     candidates: list[str] = []
     given = offer.get("image_url") or ""
     if given.startswith("/media/"):  # já resolvida antes
